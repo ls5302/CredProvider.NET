@@ -69,4 +69,8 @@
     <EmbeddedResource Include="tile-icon.bmp" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>$(frameworkdir)\$(frameworkversion)regasm $(TargetDir)CredProvider.NET.dll /regfile:$(TargetDir)register.reg
+</PostBuildEvent>
+  </PropertyGroup>
 </Project>
