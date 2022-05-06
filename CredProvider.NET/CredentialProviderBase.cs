@@ -93,7 +93,7 @@ namespace CredProvider.NET
         {
             Logger.Write();
 
-            pdwCount = (uint)view.CredentialCount;
+            pdwCount = (uint)providerUsers.Count;
 
             pdwDefault = (uint)view.DefaultCredential;
 
