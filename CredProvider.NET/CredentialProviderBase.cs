@@ -97,6 +97,21 @@ namespace CredProvider.NET
 
             pdwDefault = (uint)view.DefaultCredential;
 
+            if (pdwCount > 0)
+            {
+                var sessions = GetSessions();
+
+                pdwDefault = (uint)providerUsers.FindIndex(
+                    delegate (ICredentialProviderUser session)
+                    {
+                        session.GetSid(out var sid);
+                        return sessions.Find(x => x.ToString().ToUpper() == sid.ToUpper()) != null;
+                    }
+                );
+            }
+            
+            Logger.Write($"pdwDefault: {pdwDefault}");
+
             pbAutoLogonWithDefault = 0;
 
             return HRESULT.S_OK;
@@ -118,7 +133,7 @@ namespace CredProvider.NET
 
         public virtual int SetUserArray(ICredentialProviderUserArray users)
         {
-            this.providerUsers = new List<ICredentialProviderUser>();
+            providerUsers = new List<ICredentialProviderUser>();
 
             users.GetCount(out uint count);
             users.GetAccountOptions(out CREDENTIAL_PROVIDER_ACCOUNT_OPTIONS options);
@@ -132,7 +147,7 @@ namespace CredProvider.NET
                 user.GetProviderID(out Guid providerId);
                 user.GetSid(out string sid);
 
-                this.providerUsers.Add(user);
+                providerUsers.Add(user);
 
                 Logger.Write($"providerId: {providerId}; sid: {sid}");
             }
@@ -151,5 +166,57 @@ namespace CredProvider.NET
             this.providerUsers[dwIndex].GetSid(out string sid);
             return sid;
         }
+
+        private List<System.Security.Principal.SecurityIdentifier> GetSessions()
+        {
+            var sessions = new List<System.Security.Principal.SecurityIdentifier>();
+
+            System.Security.Principal.WindowsIdentity currentUser = System.Security.Principal.WindowsIdentity.GetCurrent();
+
+            // Win32 systemdate
+            DateTime systime = new DateTime(1601, 1, 1, 0, 0, 0, 0); 
+
+            // Get an array of pointers to LUIDs
+            PInvoke.LsaEnumerateLogonSessions(out UInt64 count, out IntPtr luidPtr);  
+
+            IntPtr iter = luidPtr;
+
+            for (ulong i = 0; i < count; i++)
+            {
+                IntPtr sessionData;
+
+                PInvoke.LsaGetLogonSessionData(iter, out sessionData);
+                var data = Marshal.PtrToStructure<PInvoke.SECURITY_LOGON_SESSION_DATA>(sessionData);
+                
+                // If we hace a valid logon
+                if (data.PSiD != IntPtr.Zero)
+                {
+                    // Get the security identified for futher use
+                    System.Security.Principal.SecurityIdentifier sid = new System.Security.Principal.SecurityIdentifier(data.PSiD);
+
+                    // Extract some useful information from the session data structure
+                    string username = Marshal.PtrToStringUni(data.Username.Buffer).Trim();
+                    string domain = Marshal.PtrToStringUni(data.LoginDomain.Buffer).Trim();
+                    string authpackage = Marshal.PtrToStringUni(data.AuthenticationPackage.Buffer).Trim();
+
+                    PInvoke.SECURITY_LOGON_TYPE secType = (PInvoke.SECURITY_LOGON_TYPE)data.LogonType;
+
+                    if (secType == PInvoke.SECURITY_LOGON_TYPE.Interactive && sid.IsAccountSid())
+                    {
+                        sessions.Add(sid);
+                        DateTime time = systime.AddTicks((long)data.LoginTime);
+                        Logger.Write($"User: {sid} Domain: {domain} Login Type: ({data.LogonType}) {secType.ToString()} Login Time: {time.ToLocalTime().ToString()}");
+                    }
+                }
+                // Move the pointer forward
+                iter = (IntPtr)((Int64)iter + Marshal.SizeOf(typeof(PInvoke.LUID)));
+
+                // Free the SECURITY_LOGON_SESSION_DATA memory in the struct
+                PInvoke.LsaFreeReturnBuffer(sessionData);
+            }
+
+            return sessions;
+        }
+
     }
 }
